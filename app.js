@@ -119,14 +119,36 @@
     return `<div class="stats"><div class="stat"><span>License tải về</span><strong>${licenses.length}</strong></div><div class="stat"><span>Đang hoạt động</span><strong>${active}</strong></div><div class="stat"><span>Sắp hết hạn (7 ngày)</span><strong>${expiring}</strong></div><div class="stat"><span>API Key của tôi</span><strong>${apiKeys.length}</strong></div></div>`;
   }
   function homePanel() {
-    return `${stats()}<section class="panel"><h2>Thao tác nhanh</h2><p class="muted">Bạn có thể cấp và quản lý license mà không cần cài IPA.</p><div class="actions">${btn('Danh sách License','nav-keys')}${btn('Quản lý API Key','nav-api')}${me.is_admin?btn('Cấp License mới','nav-issue','') : btn('Kích hoạt License','nav-activate','')}</div></section><section class="panel"><h2>Trạng thái máy chủ</h2><p class="muted">${esc(apiUrl)}</p><div class="actions">${btn('Kiểm tra kết nối','ping')}</div></section><div class="notice">Dữ liệu được tải trực tiếp từ Key Server. Gói thử nghiệm chưa có thanh toán, bot Telegram, khôi phục mật khẩu hoặc sao lưu tự động.</div>`;
+    return `${stats()}<section class="panel"><h2>Thao tác nhanh</h2><p class="muted">Tạo và quản lý License ngay trên điện thoại.</p><div class="actions">${btn('Danh sách License','nav-keys')}${btn('Quản lý API Key','nav-api')}${me.is_admin?btn('Cấp License mới','nav-issue','') : btn('Kích hoạt License','nav-activate','')}</div></section><section class="panel"><h2>Trạng thái máy chủ</h2><p class="muted">${esc(apiUrl)}</p><div class="actions">${btn('Kiểm tra kết nối','ping')}</div></section><div class="notice">Dữ liệu lấy trực tiếp từ Key Server. Telegram Bot KeyHub đã được tích hợp riêng. Hiện chưa có sao lưu tự động hoặc thanh toán.</div>`;
   }
   function keyRecord(item) {
     const attrs=`data-id="${esc(item.id)}"`;
     return `<div class="record"><div class="record-header"><div><div class="record-title">${esc(item.prefix)}…</div><div class="record-meta">Chủ sở hữu: ${esc(item.owner_email)}<br>Hạn: ${fmt(item.expires_at)}<br>Thiết bị: ${item.device_count} / ${item.device_limit}${item.note?'<br>Ghi chú: '+esc(item.note):''}</div></div><span class="pill ${item.is_active?'':'off'}">${item.is_active?'Hiệu lực':'Hết hạn/Thu hồi'}</span></div><div class="actions">${btn('Thiết bị','devices','small alt',attrs)}${me.is_admin && item.is_active?btn('Thu hồi','revoke','small danger',attrs):''}${me.is_admin && !item.is_active?btn('Xóa vĩnh viễn','delete-license','small danger',attrs):''}</div></div>`;
   }
+  function filteredLicenses() {
+    const term = licenseQuery.trim().toLocaleLowerCase('vi-VN');
+    return licenses.filter(item => {
+      if (licenseStatus === 'active' && !item.is_active) return false;
+      if (licenseStatus === 'inactive' && item.is_active) return false;
+      if (!term) return true;
+      return [item.prefix, item.owner_email, item.note].some(value =>
+        String(value || '').toLocaleLowerCase('vi-VN').includes(term));
+    });
+  }
+  function licenseCards() {
+    const shown = filteredLicenses();
+    return shown.length ? shown.map(keyRecord).join('')
+      : '<div class="empty">Không tìm thấy License phù hợp với bộ lọc.</div>';
+  }
   function licensesPanel() {
-    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kích hoạt','nav-activate','')}${btn('Tải lại','refresh','alt')}${me.is_admin?btn('Xóa tất cả Key hết hạn / đã thu hồi','delete-inactive-licenses','danger'):''}</div>${me.is_admin?'<p class="hint">Chỉ xóa License đã hết hạn hoặc bị thu hồi. Xóa vĩnh viễn cả thiết bị và lịch sử liên quan; không thể hoàn tác. Thao tác hàng loạt tối đa 500 License/lần.</p>':''}${licenses.length?licenses.map(keyRecord).join(''):'<div class="empty">Chưa có license nào.</div>'}</section>`;
+    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kích hoạt','nav-activate','')}${btn('Tải lại','refresh','alt')}</div><div class="license-filters"><label class="field">Tìm License<input data-filter="license-query" type="search" autocomplete="off" value="${esc(licenseQuery)}" placeholder="Mã, email hoặc ghi chú…"></label><label class="field">Trạng thái<select data-filter="license-status"><option value="all" ${licenseStatus==='all'?'selected':''}>Tất cả</option><option value="active" ${licenseStatus==='active'?'selected':''}>Còn hiệu lực</option><option value="inactive" ${licenseStatus==='inactive'?'selected':''}>Hết hạn / đã thu hồi</option></select></label></div><div class="result-count" id="license-count"></div><div id="license-results">${licenseCards()}</div>${me.is_admin?'<div class="actions">'+btn('Xóa tất cả Key hết hạn / đã thu hồi','delete-inactive-licenses','danger')+'</div><p class="hint">Chỉ xóa License đã hết hạn hoặc bị thu hồi. Xóa vĩnh viễn cả thiết bị và lịch sử liên quan; không thể hoàn tác. Tối đa 500 License/lần.</p>':''}</section>`;
+  }
+  function updateLicenseFilters() {
+    const box = document.getElementById('license-results');
+    if (!box) return;
+    box.innerHTML = licenseCards();
+    const count = document.getElementById('license-count');
+    if (count) count.textContent = 'Hiển thị ' + filteredLicenses().length + ' / ' + licenses.length + ' License';
   }
   function issuePanel() {
     return `<section class="panel"><h2>Cấp License mới</h2><p class="muted">Chỉ admin được tạo. Email nhận Key phải có tài khoản trước.</p><form data-form="issue"><div class="field"><label>Email người nhận</label><input name="owner_email" type="email" required placeholder="khachhang@example.com"></div><div class="two-col" style="margin-top:12px"><div><label>Thời hạn (ngày)</label><input name="expires_days" type="number" min="1" max="3650" value="30" required></div><div><label>Số thiết bị</label><input name="device_limit" type="number" min="1" max="10" value="1" required></div></div><div class="field" style="margin-top:12px"><label>Ghi chú</label><input name="note" maxlength="200" placeholder="Gói 30 ngày"></div><div class="actions"><button class="btn" type="submit">Tạo Key</button>${btn('Trở lại danh sách','nav-keys')}</div></form></section>`;
@@ -149,7 +171,7 @@
     return `<section class="panel"><h2>API Key</h2><p class="muted">Tạo API Key dùng cho tích hợp kỹ thuật. Hệ thống chỉ hiển thị giá trị bí mật một lần.</p><form data-form="create-api"><div class="field"><label>Tên API Key</label><input name="label" required maxlength="80" placeholder="Ứng dụng của tôi"></div><div class="actions"><button class="btn" type="submit">Tạo API Key mới</button>${btn('Tải lại','refresh-api')}</div></form>${apiKeys.length?apiKeys.map(k=>`<div class="record"><div class="record-header"><div><div class="record-title">${esc(k.label)}</div><div class="record-meta">${esc(k.prefix)}…<br>Tạo: ${fmt(k.created_at)}</div></div><span class="pill ${k.revoked_at?'off':''}">${k.revoked_at?'Đã thu hồi':'Hoạt động'}</span></div>${k.revoked_at?'':`<div class="actions">${btn('Thu hồi','revoke-api','small danger',`data-id="${esc(k.id)}"`)}</div>`}</div>`).join(''):'<div class="empty">Chưa có API Key nào.</div>'}</section>`;
   }
   function accountPanel() {
-    return `<section class="panel"><h2>Thông tin tài khoản</h2><div class="record"><div class="record-title">${esc(me.email)}</div><div class="record-meta">Quyền: ${me.is_admin?'Quản trị viên':'Người dùng'}<br>Tham gia: ${fmt(me.created_at)}</div></div><div class="actions">${btn('Đăng xuất','logout','danger')}${btn('Cấu hình API','settings')}</div></section><div class="notice">Bản web không lưu token đăng nhập trong localStorage. Để bảo vệ Key, bạn có thể phải đăng nhập lại khi đóng hoặc tải lại trang.</div>`;
+    return `<section class="panel"><h2>Thông tin tài khoản</h2><div class="record"><div class="record-title">${esc(me.email)}</div><div class="record-meta">Quyền: ${me.is_admin?'Quản trị viên':'Người dùng'}<br>Tham gia: ${fmt(me.created_at)}</div></div><div class="record-meta" style="margin-top:14px">Ghi nhớ đăng nhập: <strong>${rememberLogin?'Đang bật (thiết bị cá nhân)':'Đã tắt'}</strong></div><div class="actions">${btn('Đăng xuất','logout','danger')}${btn('Cấu hình API','settings')}</div></section><div class="notice">Website không lưu mật khẩu. Khi bật ghi nhớ, mã làm mới phiên được lưu trong bộ nhớ trình duyệt và có thể bị truy cập nếu trình duyệt hoặc website bị xâm nhập. Hãy đăng xuất trên thiết bị dùng chung.</div>`;
   }
   function secretPanel() {
     if(!revealed)return '';
@@ -169,6 +191,7 @@
     else content=homePanel();
     const title={home:'Tổng quan',keys:'Danh sách License',api:'Quản lý API Key',account:'Tài khoản',issue:'Cấp License',activate:'Kích hoạt License',devices:'Thiết bị'}[tab]||'Tổng quan';
     app.innerHTML=header(title)+`<main class="content">${secretPanel()}${content}</main>`+menu();
+    if (tab === 'keys') updateLicenseFilters();
   }
   async function loadData() {const results=await Promise.all([request('/keys'),request('/api-keys')]);licenses=results[0];apiKeys=results[1];}
   async function login(email,password,remember){ const t=await request('/auth/login','POST',{email,password});access=t.access_token;refresh=t.refresh_token;rememberLogin=Boolean(remember);persistSession();me=await request('/me');await loadData();tab='home';render();notify('Đăng nhập thành công.');}
@@ -204,6 +227,18 @@
     e.preventDefault();if(busy)return;busy=true;
     const submit=e.target.querySelector('[type=submit]');if(submit)submit.disabled=true;
     try {await execForm(e.target);} catch(err){notify(err.message||'Có lỗi xảy ra',true);} finally {busy=false;if(submit && submit.isConnected)submit.disabled=false;}
+  });
+  app.addEventListener('input', e => {
+    if (e.target.matches('[data-filter="license-query"]')) {
+      licenseQuery = e.target.value;
+      updateLicenseFilters();
+    }
+  });
+  app.addEventListener('change', e => {
+    if (e.target.matches('[data-filter="license-status"]')) {
+      licenseStatus = e.target.value;
+      updateLicenseFilters();
+    }
   });
   app.addEventListener('click',async e=>{
     const button=e.target.closest('[data-action]');if(!button||busy)return;
