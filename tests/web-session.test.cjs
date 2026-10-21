@@ -38,6 +38,10 @@ function harness(initial = new Map()) {
     '/keys': [license('AABBCCDDEEFF', 'Testing device', true),
               license('001122334455', 'Old license', false)],
     '/api-keys': [],
+    '/keys/activate': {
+      id:'activated-test', prefix:'AABBCCDDEEFF', expires_at:1792540800,
+      is_active:true, device_count:1, device_limit:1,
+    },
     '/health': {status: 'ok'},
     '/auth/logout': {message: 'Signed out'},
   };
@@ -76,12 +80,19 @@ function harness(initial = new Map()) {
   return {app, saved, requests, elements};
 }
 
-function form(fields) {
-  const button = {disabled: false, isConnected: true};
+function form(fields, formName = 'login') {
+  const names = new Set();
+  const button = {
+    disabled: false, isConnected: true, textContent:'Kích hoạt',
+    classList: {add: cls => names.add(cls),
+                remove: cls => names.delete(cls),
+                contains: cls => names.has(cls)},
+  };
   return {
-    dataset: {form: 'login'}, fields,
+    dataset: {form: formName}, fields, button,
     matches: selector => selector === 'form[data-form]',
-    querySelector: () => button
+    querySelector: () => button,
+    setAttribute(){}, removeAttribute(){}
   };
 }
 
@@ -153,4 +164,27 @@ test('logout clears saved session token', async () => {
   });
   assert.equal(h.saved.has(STORE_KEY),false);
   assert.ok(h.app.innerHTML.includes('Đăng nhập KeyHub'));
+});
+
+
+test('activation shows spinner before server response and success with expiry', async () => {
+  const h = harness();
+  await h.app.handlers.submit({
+    target: form({email:'admin@example.com', password:'private-password'}),
+    preventDefault(){}
+  });
+  await h.app.handlers.click({
+    target: {closest: () => ({dataset:{action:'tab',tab:'activate'}})}
+  });
+  const fields = form({key:'duyle-ABCDEF123456-lotsOfRandomLicenseCharacters',label:'Safari'},'activate');
+  const submit = h.app.handlers.submit({target:fields,preventDefault(){}});
+  assert.equal(fields.button.disabled,true);
+  assert.equal(fields.button.classList.contains('is-loading'),true);
+  assert.ok(fields.button.textContent.includes('Đang kiểm tra'));
+  await submit;
+  assert.equal(fields.button.classList.contains('is-loading'),false);
+  assert.equal(fields.button.disabled,false);
+  assert.ok(h.app.innerHTML.includes('Kích hoạt thành công'));
+  assert.ok(h.app.innerHTML.includes('Hết hạn:'));
+  assert.ok(h.requests.some(r=>r.relative==='/keys/activate'));
 });
