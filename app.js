@@ -193,7 +193,7 @@
     else if(tab==='devices') content=devicesPanel();
     else content=homePanel();
     const title={home:'Tổng quan',keys:'Danh sách License',api:'Quản lý API Key',account:'Tài khoản',issue:'Cấp License',activate:'Kích hoạt License',devices:'Thiết bị'}[tab]||'Tổng quan';
-    const activationBanner = activationResult ?
+    const activationBanner = tab === 'keys' && activationResult ?
       `<section class="panel activation-result" role="status" aria-live="polite"><strong>✓ Kích hoạt thành công</strong><p>License: ${esc(activationResult.prefix)}…</p><p><strong>Hết hạn: ${fmt(activationResult.expires_at)} (giờ trên thiết bị)</strong></p><div class="actions">${btn('Đóng thông báo','dismiss-activation','alt')}</div></section>` : '';
     app.innerHTML=header(title)+`<main class="content">${secretPanel()}${activationBanner}${content}</main>`+menu();
     if (tab === 'keys') updateLicenseFilters();
