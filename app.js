@@ -2,10 +2,15 @@
 (() => {
   const app = document.getElementById('app');
   const toastEl = document.getElementById('toast');
-  const KEYS = { url: 'keyhub_api_url_v1', device: 'keyhub_device_id_v1' };
+  const KEYS = { url: 'keyhub_api_url_v1', device: 'keyhub_device_id_v1', refresh: 'keyhub_remember_refresh_v1' };
   let apiUrl = localStorage.getItem(KEYS.url) || '';
   let deviceId = localStorage.getItem(KEYS.device) || '';
-  let access = null, refresh = null, me = null, tab = 'home';
+  // Access tokens and passwords stay in memory. Only an opt-in refresh token
+  // is persisted so a returning user can restore a session.
+  let access = null, refresh = localStorage.getItem(KEYS.refresh) || null;
+  let rememberLogin = Boolean(refresh), renewal = null;
+  let me = null, tab = 'home';
+  let licenseQuery = '', licenseStatus = 'all';
   let licenses = [], apiKeys = [], devices = [], viewedKey = '', revealed = null;
   let deviceEvents = [], showDeviceHistory = false, editingDeviceId = '';
   let busy = false, messageTimeout;
@@ -15,6 +20,41 @@
   }
   const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = ts => ts ? new Date(ts * 1000).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  function persistSession() {
+    if (rememberLogin && refresh) localStorage.setItem(KEYS.refresh, refresh);
+    else localStorage.removeItem(KEYS.refresh);
+  }
+  function clearSession() {
+    access = null; refresh = null; me = null; rememberLogin = false;
+    licenses = []; apiKeys = []; devices = []; revealed = null;
+    localStorage.removeItem(KEYS.refresh);
+  }
+  async function renewSession() {
+    if (!refresh) throw Error('Chưa có phiên đăng nhập để khôi phục.');
+    if (renewal) return renewal;
+    const token = refresh;
+    renewal = (async () => {
+      const next = await request('/auth/refresh', 'POST', {refresh_token:token}, false);
+      access = next.access_token;
+      refresh = next.refresh_token;
+      persistSession(); // Refresh tokens are single-use, always store the rotated value.
+    })();
+    try { await renewal; } finally { renewal = null; }
+  }
+  async function restoreSession() {
+    try {
+      await renewSession();
+      me = await request('/me');
+      await loadData();
+      tab = 'home'; render();
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) clearSession();
+      tab = 'signin'; render();
+      notify(err.status === 401 || err.status === 403
+        ? 'Phiên đã hết hạn, hãy đăng nhập lại.'
+        : 'Chưa thể khôi phục đăng nhập. Hãy thử lại khi mạng ổn định.', true);
+    }
+  }
   function notify(message,error=false) {
     toastEl.textContent = message;
     toastEl.className = 'visible'+(error?' error':'');
@@ -31,22 +71,29 @@
     if (!apiUrl) throw Error('Bạn chưa cấu hình máy chủ API.');
     const headers = {'Accept':'application/json'};
     if (data != null) headers['Content-Type']='application/json';
-    if (access) headers['Authorization']='Bearer ' + access;
+    if (access && path !== '/health' && path !== '/auth/refresh') headers['Authorization']='Bearer ' + access;
     let response;
     try { response = await fetch(apiUrl+path,{method,headers,body:data == null?undefined:JSON.stringify(data),cache:'no-store'}); }
     catch { throw Error('Không kết nối được máy chủ. Kiểm tra URL API và CORS trên Render.'); }
     if (response.status===401 && retry && refresh && path!=='/auth/refresh') {
       try {
-        const renewed=await request('/auth/refresh','POST',{refresh_token:refresh},false);
-        access=renewed.access_token; refresh=renewed.refresh_token;
+        await renewSession();
         return request(path,method,data,false);
-      } catch { access=null; refresh=null; me=null; render(); throw Error('Phiên đăng nhập hết hạn. Hãy đăng nhập lại.'); }
+      } catch (err) {
+        if (err.status === 401 || err.status === 403) {
+          clearSession(); tab='signin'; render();
+          throw Error('Phiên đăng nhập hết hạn. Hãy đăng nhập lại.');
+        }
+        throw err;
+      }
     }
     let result;
     try {result=await response.json();} catch {result={};}
     if (!response.ok) {
       const err=Array.isArray(result.detail) ? result.detail.map(x=>x.msg).join('; ') : result.detail;
-      throw Error(typeof err==='string'?err:('Yêu cầu thất bại (HTTP '+response.status+').'));
+      const failure = Error(typeof err==='string'?err:('Yêu cầu thất bại (HTTP '+response.status+').'));
+      failure.status = response.status;
+      throw failure;
     }
     return result;
   }
@@ -55,7 +102,7 @@
     return `<header class="header"><div class="head-row"><div class="brand"><span class="brand-icon">⚿</span><span>KeyHub</span></div><button type="button" class="icon-button" data-action="settings">⚙ Cài đặt</button></div><h1>${esc(subtitle)}</h1><p>${me ? esc(me.email)+(me.is_admin?' · Quản trị viên':' · Người dùng') : 'Hệ thống quản lý giấy phép riêng'}</p></header>`;
   }
   function authPanel() {
-    return `${header('Chào mừng quay lại')}<main class="content auth"><section class="panel"><div class="auth-intro"><div class="auth-mark">🔑</div><h2>Đăng nhập KeyHub</h2><p class="muted">Bảo vệ Key và tài khoản của bạn</p></div><form class="stack" data-form="login"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" placeholder="email@example.com" required></div><div class="field"><label>Mật khẩu</label><input name="password" type="password" autocomplete="current-password" required></div><button class="btn full" type="submit">Đăng nhập</button></form><div class="actions">${btn('Tạo tài khoản mới','register','alt')}${btn('Kết nối API','settings','alt')}</div></section><div class="notice">Ứng dụng này kết nối tới máy chủ của chính bạn. Bạn cần cấu hình địa chỉ API HTTPS trước khi đăng nhập.</div></main>`;
+    return `${header('Chào mừng quay lại')}<main class="content auth"><section class="panel"><div class="auth-intro"><div class="auth-mark">🔑</div><h2>Đăng nhập KeyHub</h2><p class="muted">Quản lý License an toàn và thuận tiện</p></div><form class="stack" data-form="login"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" placeholder="email@example.com" required></div><div class="field"><label>Mật khẩu</label><input name="password" type="password" autocomplete="current-password" required></div><label class="remember"><input type="checkbox" name="remember" checked><span>Ghi nhớ đăng nhập trên thiết bị này<small>Không bật trên thiết bị dùng chung. Phiên sẽ được tự khôi phục khi mở lại web.</small></span></label><button class="btn full" type="submit">Đăng nhập</button></form>${refresh?'<div class="actions">'+btn('Thử khôi phục phiên','retry-session','alt')+'</div>':''}<div class="actions">${btn('Tạo tài khoản mới','register','alt')}${btn('Kết nối API','settings','alt')}</div></section><div class="notice">Không lưu mật khẩu. Khi chọn ghi nhớ, trình duyệt lưu mã làm mới phiên. Chỉ nên dùng trên iPhone cá nhân, và nhấn Đăng xuất khi không sử dụng.</div></main>`;
   }
   function registerPanel() {
     return `${header('Tạo tài khoản')}<main class="content auth"><section class="panel"><h2>Đăng ký người dùng</h2><form class="stack" data-form="register"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required></div><div class="field"><label>Mật khẩu (ít nhất 12 ký tự)</label><input name="password" type="password" autocomplete="new-password" minlength="12" required></div><button class="btn full" type="submit">Đăng ký</button></form><div class="actions">${btn('Quay lại đăng nhập','signin')}</div></section></main>`;
@@ -124,7 +171,7 @@
     app.innerHTML=header(title)+`<main class="content">${secretPanel()}${content}</main>`+menu();
   }
   async function loadData() {const results=await Promise.all([request('/keys'),request('/api-keys')]);licenses=results[0];apiKeys=results[1];}
-  async function login(email,password){ const t=await request('/auth/login','POST',{email,password});access=t.access_token;refresh=t.refresh_token;me=await request('/me');await loadData();tab='home';render();notify('Đăng nhập thành công.');}
+  async function login(email,password,remember){ const t=await request('/auth/login','POST',{email,password});access=t.access_token;refresh=t.refresh_token;rememberLogin=Boolean(remember);persistSession();me=await request('/me');await loadData();tab='home';render();notify('Đăng nhập thành công.');}
   async function execForm(form) {
     const values=Object.fromEntries(new FormData(form));
     if(form.dataset.form==='settings') {
@@ -132,9 +179,13 @@
       const original=apiUrl;apiUrl=u;
       try {const info=await request('/health');if(info.status!=='ok')throw Error('API không trả trạng thái ok.');}
       catch(e){apiUrl=original;throw e;}
-      localStorage.setItem(KEYS.url,u);tab=me?'home':'signin';render();notify('Kết nối API thành công.');return;
+      const changed = original !== u;
+      localStorage.setItem(KEYS.url,u);
+      if (changed) { clearSession(); tab='signin'; }
+      else tab=me?'home':'signin';
+      render();notify('Kết nối API thành công.');return;
     }
-    if(form.dataset.form==='login') {await login(values.email,values.password);return;}
+    if(form.dataset.form==='login') {await login(values.email,values.password,values.remember==='on');return;}
     if(form.dataset.form==='register') {await request('/auth/register','POST',{email:values.email,password:values.password});tab='signin';render();notify('Đăng ký thành công. Hãy đăng nhập.');return;}
     if(form.dataset.form==='issue') {const x=await request('/keys','POST',{owner_email:values.owner_email,expires_days:Number(values.expires_days),device_limit:Number(values.device_limit),note:values.note});revealed={type:'license',value:x.secret};await loadData();tab='keys';render();notify('Đã cấp License. Lưu mã ngay.');return;}
     if(form.dataset.form==='activate') {await request('/keys/activate','POST',{key:values.key.trim(),device_id:deviceId,label:values.label});await loadData();tab='keys';render();notify('Kích hoạt thành công.');return;}
@@ -161,6 +212,7 @@
     const simple={settings:'settings',back:me?'home':'signin',signin:'signin',register:'register','nav-keys':'keys','nav-api':'api','nav-issue':'issue','nav-activate':'activate'};
     if(simple[action]){tab=simple[action];render();return;}
     if(action==='clear-secret'){revealed=null;render();return;}
+    if(action==='retry-session' && refresh){app.innerHTML='<div class="loading-shell"><div class="spinner"></div>Đang khôi phục phiên…</div>';await restoreSession();return;}
     if(action==='copy-secret' && revealed){try{await navigator.clipboard.writeText(revealed.value);notify('Đã sao chép mã.');}catch{notify('Không thể sao chép tự động. Hãy chọn và sao chép mã.',true);}return;}
     if(action==='copy-device'){try{await navigator.clipboard.writeText(button.dataset.code||'');notify('Đã sao chép mã máy.');}catch{notify('Không thể sao chép. Hãy chọn mã hiển thị để sao chép.',true);}return;}
     if(action==='edit-device'){editingDeviceId=id;render();return;}
@@ -188,9 +240,12 @@
       if(action==='delete-inactive-licenses'){const result=await request('/keys/inactive?confirm=true','DELETE');licenses=await request('/keys');render();notify('Đã xóa '+result.deleted+' License. Còn '+result.remaining+' License hết hạn/đã thu hồi.');}
       if(action==='delete-device'){await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/'+encodeURIComponent(id),'DELETE');devices=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices');if(showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');licenses=await request('/keys');editingDeviceId='';render();notify('Đã gỡ thiết bị.');}
       if(action==='revoke-api'){await request('/api-keys/'+encodeURIComponent(id),'DELETE');apiKeys=await request('/api-keys');render();notify('Đã thu hồi API Key.');}
-      if(action==='logout'){try{await request('/auth/logout','POST',{refresh_token:refresh});}catch{}access=null;refresh=null;me=null;licenses=[];apiKeys=[];revealed=null;tab='signin';render();notify('Đã đăng xuất.');}
+      if(action==='logout'){try{await request('/auth/logout','POST',{refresh_token:refresh});}catch{}clearSession();tab='signin';render();notify('Đã đăng xuất khỏi thiết bị này.');}
     }catch(err){notify(err.message||'Có lỗi xảy ra.',true);}finally{busy=false;if(button.isConnected)button.disabled=false;}
   });
-  render();
+  if (refresh) {
+    app.innerHTML='<div class="loading-shell"><div class="spinner"></div>Đang khôi phục phiên đăng nhập…</div>';
+    restoreSession();
+  } else render();
   if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 })();
