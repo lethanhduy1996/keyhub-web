@@ -71,13 +71,15 @@
     if (!apiUrl) throw Error('Bạn chưa cấu hình máy chủ API.');
     const headers = {'Accept':'application/json'};
     if (data != null) headers['Content-Type']='application/json';
-    if (access && path !== '/health' && path !== '/auth/refresh') headers['Authorization']='Bearer ' + access;
+    if (access && !['/health','/auth/refresh','/auth/login','/auth/register'].includes(path)) headers['Authorization']='Bearer ' + access;
+    const tokenUsed = headers['Authorization'];
     let response;
     try { response = await fetch(apiUrl+path,{method,headers,body:data == null?undefined:JSON.stringify(data),cache:'no-store'}); }
     catch { throw Error('Không kết nối được máy chủ. Kiểm tra URL API và CORS trên Render.'); }
-    if (response.status===401 && retry && refresh && path!=='/auth/refresh') {
+    if (response.status===401 && retry && refresh && tokenUsed && path!=='/auth/refresh') {
       try {
-        await renewSession();
+        // Another request may already have rotated a single-use refresh token.
+        if (tokenUsed === 'Bearer ' + access) await renewSession();
         return request(path,method,data,false);
       } catch (err) {
         if (err.status === 401 || err.status === 403) {
