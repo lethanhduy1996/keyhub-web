@@ -7,6 +7,7 @@
   let deviceId = localStorage.getItem(KEYS.device) || '';
   let access = null, refresh = null, me = null, tab = 'home';
   let licenses = [], apiKeys = [], devices = [], viewedKey = '', revealed = null;
+  let deviceEvents = [], showDeviceHistory = false, editingDeviceId = '';
   let busy = false, messageTimeout;
   if (!deviceId) {
     deviceId = globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : 'browser-' + Array.from(globalThis.crypto.getRandomValues(new Uint8Array(20)), b => b.toString(16).padStart(2,'0')).join('');
@@ -87,7 +88,15 @@
     return `<section class="panel"><h2>Kích hoạt License</h2><p class="muted">Dùng mã License được cấp cho email đang đăng nhập.</p><form data-form="activate"><div class="field"><label>Nhập mã License</label><input name="key" required minlength="30" autocomplete="off" placeholder="IKS-..."></div><div class="field"><label>Tên thiết bị</label><input name="label" maxlength="80" value="Safari trên iPhone"></div><div class="actions"><button class="btn" type="submit">Kích hoạt</button>${btn('Trở lại danh sách','nav-keys')}</div></form><p class="hint">Lưu ý: Mã thiết bị của bản web chỉ là ID do trình duyệt tạo ra, không phải bằng chứng nhận dạng thiết bị đáng tin cậy.</p></section>`;
   }
   function devicesPanel() {
-    return `<section class="panel"><h2>Thiết bị đã kích hoạt</h2><p class="muted">Mã máy KeyHub là mã nhận diện riêng của hệ thống, không phải UDID phần cứng Apple.</p>${devices.length?devices.map(d=>`<div class="record"><div class="record-header"><div><div class="record-title">${esc(d.label||'Thiết bị chưa đặt tên')}</div><div class="record-meta">Mã máy KeyHub: <strong>${esc(d.device_code||'Chưa có')}</strong><br>Kích hoạt: ${fmt(d.created_at)}</div></div></div><div class="actions">${d.device_code?btn('Sao chép mã máy','copy-device','small alt',`data-code="${esc(d.device_code)}"`):''}${btn('Gỡ thiết bị','delete-device','small danger',`data-id="${esc(d.id)}"`)}</div></div>`).join(''):'<div class="empty">License này chưa được kích hoạt trên thiết bị nào.</div>'}<div class="actions">${btn('Quay lại License','nav-keys')}</div></section>`;
+    const descriptions = {activated:'Đã kích hoạt',renamed:'Đã đổi tên',removed:'Đã gỡ thiết bị'};
+    const cards = devices.map(d => {
+      const idAttr=`data-id="${esc(d.id)}"`;
+      const editForm = editingDeviceId===d.id && me.is_admin ?
+        `<form data-form="rename-device" class="device-edit"><input type="hidden" name="device_id" value="${esc(d.id)}"><div class="field"><label>Tên mới</label><input name="label" maxlength="80" required value="${esc(d.label)}" placeholder="Ví dụ: iPhone 13 - Khách A"></div><div class="actions"><button class="btn small" type="submit">Lưu tên</button>${btn('Hủy','cancel-edit-device','small alt')}</div></form>` : '';
+      return `<div class="record"><div class="record-header"><div><div class="record-title">${esc(d.label||'Thiết bị chưa đặt tên')}</div><div class="record-meta">Mã máy KeyHub: <strong>${esc(d.device_code||'Chưa có')}</strong><br>Kích hoạt: ${fmt(d.created_at)}<br>Xác minh gần nhất: ${d.last_verified_at?fmt(d.last_verified_at):'Chưa ghi nhận'}</div></div></div><div class="actions">${d.device_code?btn('Sao chép mã máy','copy-device','small alt',`data-code="${esc(d.device_code)}"`):''}${me.is_admin?btn('Đổi tên','edit-device','small alt',idAttr):''}${btn('Gỡ thiết bị','delete-device','small danger',idAttr)}</div>${editForm}</div>`;
+    }).join('');
+    const history = showDeviceHistory ? `<div class="history"><h3>Lịch sử thay đổi</h3><p class="muted">Nhật ký bắt đầu ghi nhận từ lần nâng cấp. Các lần xác minh thường xuyên chỉ cập nhật thời gian gần nhất.</p>${deviceEvents.length?deviceEvents.map(event=>`<div class="record"><div class="record-title">${esc(descriptions[event.event_type]||event.event_type)}</div><div class="record-meta">${esc(event.label||'Thiết bị')} · ${esc(event.device_code)}<br>${fmt(event.created_at)}</div></div>`).join(''):'<div class="empty">Chưa có sự kiện nào được ghi nhận.</div>'}</div>` : '';
+    return `<section class="panel"><h2>Quản lý thiết bị</h2><p class="muted">Mã máy KeyHub là mã riêng của hệ thống, không phải UDID phần cứng Apple. Tên thiết bị chỉ Admin mới sửa được.</p>${devices.length?cards:'<div class="empty">License này chưa được kích hoạt trên thiết bị nào.</div>'}<div class="actions">${btn(showDeviceHistory?'Ẩn lịch sử':'Xem lịch sử','toggle-device-history','alt')}${btn('Quay lại License','nav-keys')}</div>${history}</section>`;
   }
   function apiPanel() {
     return `<section class="panel"><h2>API Key</h2><p class="muted">Tạo API Key dùng cho tích hợp kỹ thuật. Hệ thống chỉ hiển thị giá trị bí mật một lần.</p><form data-form="create-api"><div class="field"><label>Tên API Key</label><input name="label" required maxlength="80" placeholder="Ứng dụng của tôi"></div><div class="actions"><button class="btn" type="submit">Tạo API Key mới</button>${btn('Tải lại','refresh-api')}</div></form>${apiKeys.length?apiKeys.map(k=>`<div class="record"><div class="record-header"><div><div class="record-title">${esc(k.label)}</div><div class="record-meta">${esc(k.prefix)}…<br>Tạo: ${fmt(k.created_at)}</div></div><span class="pill ${k.revoked_at?'off':''}">${k.revoked_at?'Đã thu hồi':'Hoạt động'}</span></div>${k.revoked_at?'':`<div class="actions">${btn('Thu hồi','revoke-api','small danger',`data-id="${esc(k.id)}"`)}</div>`}</div>`).join(''):'<div class="empty">Chưa có API Key nào.</div>'}</section>`;
@@ -129,6 +138,14 @@
     if(form.dataset.form==='register') {await request('/auth/register','POST',{email:values.email,password:values.password});tab='signin';render();notify('Đăng ký thành công. Hãy đăng nhập.');return;}
     if(form.dataset.form==='issue') {const x=await request('/keys','POST',{owner_email:values.owner_email,expires_days:Number(values.expires_days),device_limit:Number(values.device_limit),note:values.note});revealed={type:'license',value:x.secret};await loadData();tab='keys';render();notify('Đã cấp License. Lưu mã ngay.');return;}
     if(form.dataset.form==='activate') {await request('/keys/activate','POST',{key:values.key.trim(),device_id:deviceId,label:values.label});await loadData();tab='keys';render();notify('Kích hoạt thành công.');return;}
+    if(form.dataset.form==='rename-device') {
+      const label=String(values.label||'').trim();
+      if(!label)throw Error('Hãy nhập tên thiết bị.');
+      await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/'+encodeURIComponent(values.device_id)+'/rename','POST',{label});
+      devices=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices');
+      if(showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');
+      editingDeviceId='';render();notify('Đã đổi tên thiết bị.');return;
+    }
     if(form.dataset.form==='create-api') {const x=await request('/api-keys','POST',{label:values.label.trim()});revealed={type:'api',value:x.secret};await loadData();tab='api';render();notify('Đã tạo API Key. Lưu mã ngay.');return;}
   }
   app.addEventListener('submit',async e=>{
@@ -146,15 +163,18 @@
     if(action==='clear-secret'){revealed=null;render();return;}
     if(action==='copy-secret' && revealed){try{await navigator.clipboard.writeText(revealed.value);notify('Đã sao chép mã.');}catch{notify('Không thể sao chép tự động. Hãy chọn và sao chép mã.',true);}return;}
     if(action==='copy-device'){try{await navigator.clipboard.writeText(button.dataset.code||'');notify('Đã sao chép mã máy.');}catch{notify('Không thể sao chép. Hãy chọn mã hiển thị để sao chép.',true);}return;}
+    if(action==='edit-device'){editingDeviceId=id;render();return;}
+    if(action==='cancel-edit-device'){editingDeviceId='';render();return;}
     if(['revoke','revoke-api','delete-device'].includes(action)&&!confirm('Bạn xác nhận thực hiện thao tác này?'))return;
     busy=true;button.disabled=true;
     try{
       if(action==='refresh'){licenses=await request('/keys');render();notify('Đã cập nhật License.');}
       if(action==='refresh-api'){apiKeys=await request('/api-keys');render();notify('Đã cập nhật API Key.');}
       if(action==='ping'){const info=await request('/health');notify(info.status==='ok'?'Máy chủ đang hoạt động.':'Phản hồi máy chủ không hợp lệ.',info.status!=='ok');}
-      if(action==='devices'){viewedKey=id;devices=await request('/keys/'+encodeURIComponent(id)+'/devices');tab='devices';render();}
+      if(action==='devices'){viewedKey=id;devices=await request('/keys/'+encodeURIComponent(id)+'/devices');deviceEvents=[];showDeviceHistory=false;editingDeviceId='';tab='devices';render();}
+      if(action==='toggle-device-history'){if(!showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');showDeviceHistory=!showDeviceHistory;render();}
       if(action==='revoke'){await request('/keys/'+encodeURIComponent(id)+'/revoke','POST');licenses=await request('/keys');render();notify('Đã thu hồi License.');}
-      if(action==='delete-device'){await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/'+encodeURIComponent(id),'DELETE');devices=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices');licenses=await request('/keys');render();notify('Đã gỡ thiết bị.');}
+      if(action==='delete-device'){await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/'+encodeURIComponent(id),'DELETE');devices=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices');if(showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');licenses=await request('/keys');editingDeviceId='';render();notify('Đã gỡ thiết bị.');}
       if(action==='revoke-api'){await request('/api-keys/'+encodeURIComponent(id),'DELETE');apiKeys=await request('/api-keys');render();notify('Đã thu hồi API Key.');}
       if(action==='logout'){try{await request('/auth/logout','POST',{refresh_token:refresh});}catch{}access=null;refresh=null;me=null;licenses=[];apiKeys=[];revealed=null;tab='signin';render();notify('Đã đăng xuất.');}
     }catch(err){notify(err.message||'Có lỗi xảy ra.',true);}finally{busy=false;if(button.isConnected)button.disabled=false;}
