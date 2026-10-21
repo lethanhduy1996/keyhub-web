@@ -13,6 +13,7 @@
   let licenseQuery = '', licenseStatus = 'all';
   let licenses = [], apiKeys = [], devices = [], viewedKey = '', revealed = null;
   let deviceEvents = [], showDeviceHistory = false, editingDeviceId = '';
+  let activationResult = null;
   let busy = false, messageTimeout;
   if (!deviceId) {
     deviceId = globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : 'browser-' + Array.from(globalThis.crypto.getRandomValues(new Uint8Array(20)), b => b.toString(16).padStart(2,'0')).join('');
@@ -192,7 +193,9 @@
     else if(tab==='devices') content=devicesPanel();
     else content=homePanel();
     const title={home:'Tổng quan',keys:'Danh sách License',api:'Quản lý API Key',account:'Tài khoản',issue:'Cấp License',activate:'Kích hoạt License',devices:'Thiết bị'}[tab]||'Tổng quan';
-    app.innerHTML=header(title)+`<main class="content">${secretPanel()}${content}</main>`+menu();
+    const activationBanner = activationResult ?
+      `<section class="panel activation-result" role="status" aria-live="polite"><strong>✓ Kích hoạt thành công</strong><p>License: ${esc(activationResult.prefix)}…</p><p><strong>Hết hạn: ${fmt(activationResult.expires_at)} (giờ trên thiết bị)</strong></p><div class="actions">${btn('Đóng thông báo','dismiss-activation','alt')}</div></section>` : '';
+    app.innerHTML=header(title)+`<main class="content">${secretPanel()}${activationBanner}${content}</main>`+menu();
     if (tab === 'keys') updateLicenseFilters();
   }
   async function loadData() {const results=await Promise.all([request('/keys'),request('/api-keys')]);licenses=results[0];apiKeys=results[1];}
@@ -213,7 +216,12 @@
     if(form.dataset.form==='login') {await login(values.email,values.password,values.remember==='on');return;}
     if(form.dataset.form==='register') {await request('/auth/register','POST',{email:values.email,password:values.password});tab='signin';render();notify('Đăng ký thành công. Hãy đăng nhập.');return;}
     if(form.dataset.form==='issue') {const x=await request('/keys','POST',{owner_email:values.owner_email,expires_days:Number(values.expires_days),device_limit:Number(values.device_limit),note:values.note});revealed={type:'license',value:x.secret};await loadData();tab='keys';render();notify('Đã cấp License. Lưu mã ngay.');return;}
-    if(form.dataset.form==='activate') {await request('/keys/activate','POST',{key:values.key.trim(),device_id:deviceId,label:values.label});await loadData();tab='keys';render();notify('Kích hoạt thành công.');return;}
+    if(form.dataset.form==='activate') {
+      const activated = await request('/keys/activate','POST',
+        {key:values.key.trim(),device_id:deviceId,label:values.label});
+      activationResult = {prefix: activated.prefix, expires_at: activated.expires_at};
+      await loadData();tab='keys';render();notify('Đã kích hoạt License.');return;
+    }
     if(form.dataset.form==='rename-device') {
       const label=String(values.label||'').trim();
       if(!label)throw Error('Hãy nhập tên thiết bị.');
@@ -228,7 +236,23 @@
     if(!e.target.matches('form[data-form]'))return;
     e.preventDefault();if(busy)return;busy=true;
     const submit=e.target.querySelector('[type=submit]');if(submit)submit.disabled=true;
-    try {await execForm(e.target);} catch(err){notify(err.message||'Có lỗi xảy ra',true);} finally {busy=false;if(submit && submit.isConnected)submit.disabled=false;}
+    const isActivation = e.target.dataset.form === 'activate';
+    if (isActivation && submit) {
+      submit.classList.add('is-loading');
+      submit.textContent = 'Đang kiểm tra License…';
+      e.target.setAttribute('aria-busy','true');
+    }
+    try {await execForm(e.target);} catch(err){notify(err.message||'Có lỗi xảy ra',true);} finally {
+      busy=false;
+      if (submit && submit.isConnected) {
+        submit.disabled=false;
+        if (isActivation) {
+          submit.classList.remove('is-loading');
+          submit.textContent='Kích hoạt';
+          e.target.removeAttribute('aria-busy');
+        }
+      }
+    }
   });
   app.addEventListener('input', e => {
     if (e.target.matches('[data-filter="license-query"]')) {
@@ -249,6 +273,7 @@
     const simple={settings:'settings',back:me?'home':'signin',signin:'signin',register:'register','nav-keys':'keys','nav-api':'api','nav-issue':'issue','nav-activate':'activate'};
     if(simple[action]){tab=simple[action];render();return;}
     if(action==='clear-secret'){revealed=null;render();return;}
+    if(action==='dismiss-activation'){activationResult=null;render();return;}
     if(action==='retry-session' && refresh){app.innerHTML='<div class="loading-shell"><div class="spinner"></div>Đang khôi phục phiên…</div>';await restoreSession();return;}
     if(action==='copy-secret' && revealed){try{await navigator.clipboard.writeText(revealed.value);notify('Đã sao chép mã.');}catch{notify('Không thể sao chép tự động. Hãy chọn và sao chép mã.',true);}return;}
     if(action==='copy-device'){try{await navigator.clipboard.writeText(button.dataset.code||'');notify('Đã sao chép mã máy.');}catch{notify('Không thể sao chép. Hãy chọn mã hiển thị để sao chép.',true);}return;}
