@@ -17,3 +17,5 @@ jobs:
         run: |
           node --check app.js
           node --check sw.js
+      - name: Functional web session smoke tests
+        run: node --test tests/web-session.test.cjs
