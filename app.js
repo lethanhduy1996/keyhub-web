@@ -76,10 +76,10 @@
   }
   function keyRecord(item) {
     const attrs=`data-id="${esc(item.id)}"`;
-    return `<div class="record"><div class="record-header"><div><div class="record-title">${esc(item.prefix)}…</div><div class="record-meta">Chủ sở hữu: ${esc(item.owner_email)}<br>Hạn: ${fmt(item.expires_at)}<br>Thiết bị: ${item.device_count} / ${item.device_limit}${item.note?'<br>Ghi chú: '+esc(item.note):''}</div></div><span class="pill ${item.is_active?'':'off'}">${item.is_active?'Hiệu lực':'Hết hạn/Thu hồi'}</span></div><div class="actions">${btn('Thiết bị','devices','small alt',attrs)}${me.is_admin && item.is_active?btn('Thu hồi','revoke','small danger',attrs):''}</div></div>`;
+    return `<div class="record"><div class="record-header"><div><div class="record-title">${esc(item.prefix)}…</div><div class="record-meta">Chủ sở hữu: ${esc(item.owner_email)}<br>Hạn: ${fmt(item.expires_at)}<br>Thiết bị: ${item.device_count} / ${item.device_limit}${item.note?'<br>Ghi chú: '+esc(item.note):''}</div></div><span class="pill ${item.is_active?'':'off'}">${item.is_active?'Hiệu lực':'Hết hạn/Thu hồi'}</span></div><div class="actions">${btn('Thiết bị','devices','small alt',attrs)}${me.is_admin && item.is_active?btn('Thu hồi','revoke','small danger',attrs):''}${me.is_admin && !item.is_active?btn('Xóa vĩnh viễn','delete-license','small danger',attrs):''}</div></div>`;
   }
   function licensesPanel() {
-    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kích hoạt','nav-activate','')}${btn('Tải lại','refresh','alt')}</div>${licenses.length?licenses.map(keyRecord).join(''):'<div class="empty">Chưa có license nào.</div>'}</section>`;
+    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kích hoạt','nav-activate','')}${btn('Tải lại','refresh','alt')}${me.is_admin?btn('Xóa tất cả Key hết hạn / đã thu hồi','delete-inactive-licenses','danger'):''}</div>${me.is_admin?'<p class="hint">Chỉ xóa License đã hết hạn hoặc bị thu hồi. Xóa vĩnh viễn cả thiết bị và lịch sử liên quan; không thể hoàn tác. Thao tác hàng loạt tối đa 500 License/lần.</p>':''}${licenses.length?licenses.map(keyRecord).join(''):'<div class="empty">Chưa có license nào.</div>'}</section>`;
   }
   function issuePanel() {
     return `<section class="panel"><h2>Cấp License mới</h2><p class="muted">Chỉ admin được tạo. Email nhận Key phải có tài khoản trước.</p><form data-form="issue"><div class="field"><label>Email người nhận</label><input name="owner_email" type="email" required placeholder="khachhang@example.com"></div><div class="two-col" style="margin-top:12px"><div><label>Thời hạn (ngày)</label><input name="expires_days" type="number" min="1" max="3650" value="30" required></div><div><label>Số thiết bị</label><input name="device_limit" type="number" min="1" max="10" value="1" required></div></div><div class="field" style="margin-top:12px"><label>Ghi chú</label><input name="note" maxlength="200" placeholder="Gói 30 ngày"></div><div class="actions"><button class="btn" type="submit">Tạo Key</button>${btn('Trở lại danh sách','nav-keys')}</div></form></section>`;
@@ -166,6 +166,16 @@
     if(action==='edit-device'){editingDeviceId=id;render();return;}
     if(action==='cancel-edit-device'){editingDeviceId='';render();return;}
     if(['revoke','revoke-api','delete-device'].includes(action)&&!confirm('Bạn xác nhận thực hiện thao tác này?'))return;
+    if(action==='delete-license'){
+      const item=licenses.find(x=>x.id===id);
+      if(!me?.is_admin||!item||item.is_active){notify('Chỉ Admin được xóa License hết hạn hoặc đã thu hồi.',true);return;}
+      if(!confirm('XÓA VĨNH VIỄN License '+item.prefix+'…?\nThiết bị và lịch sử của License cũng sẽ bị xóa. Không thể hoàn tác.'))return;
+    }
+    if(action==='delete-inactive-licenses'){
+      if(!me?.is_admin){notify('Chỉ Admin được phép xóa.',true);return;}
+      if(!confirm('XÓA VĨNH VIỄN mọi License hết hạn hoặc đã thu hồi (tối đa 500 mỗi lần)?\nThiết bị và lịch sử của các License cũng bị xóa. Không thể hoàn tác.'))return;
+      if(prompt('Để xác nhận xóa hàng loạt, nhập chính xác XOA:')!=='XOA')return;
+    }
     busy=true;button.disabled=true;
     try{
       if(action==='refresh'){licenses=await request('/keys');render();notify('Đã cập nhật License.');}
@@ -174,6 +184,8 @@
       if(action==='devices'){viewedKey=id;devices=await request('/keys/'+encodeURIComponent(id)+'/devices');deviceEvents=[];showDeviceHistory=false;editingDeviceId='';tab='devices';render();}
       if(action==='toggle-device-history'){if(!showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');showDeviceHistory=!showDeviceHistory;render();}
       if(action==='revoke'){await request('/keys/'+encodeURIComponent(id)+'/revoke','POST');licenses=await request('/keys');render();notify('Đã thu hồi License.');}
+      if(action==='delete-license'){await request('/keys/'+encodeURIComponent(id),'DELETE');licenses=await request('/keys');render();notify('Đã xóa vĩnh viễn License và dữ liệu thiết bị liên quan.');}
+      if(action==='delete-inactive-licenses'){const result=await request('/keys/inactive?confirm=true','DELETE');licenses=await request('/keys');render();notify('Đã xóa '+result.deleted+' License. Còn '+result.remaining+' License hết hạn/đã thu hồi.');}
       if(action==='delete-device'){await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/'+encodeURIComponent(id),'DELETE');devices=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices');if(showDeviceHistory)deviceEvents=await request('/keys/'+encodeURIComponent(viewedKey)+'/devices/history');licenses=await request('/keys');editingDeviceId='';render();notify('Đã gỡ thiết bị.');}
       if(action==='revoke-api'){await request('/api-keys/'+encodeURIComponent(id),'DELETE');apiKeys=await request('/api-keys');render();notify('Đã thu hồi API Key.');}
       if(action==='logout'){try{await request('/auth/logout','POST',{refresh_token:refresh});}catch{}access=null;refresh=null;me=null;licenses=[];apiKeys=[];revealed=null;tab='signin';render();notify('Đã đăng xuất.');}
