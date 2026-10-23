@@ -38,9 +38,8 @@ function harness(initial = new Map()) {
     '/keys': [license('AABBCCDDEEFF', 'Testing device', true),
               license('001122334455', 'Old license', false)],
     '/api-keys': [],
-    '/keys/activate': {
-      id:'activated-test', prefix:'AABBCCDDEEFF', expires_at:1792540800,
-      is_active:true, device_count:1, device_limit:1,
+    '/keys/check': {
+      valid:true, expires_at:1792540800, device_code:null
     },
     '/health': {status: 'ok'},
     '/auth/logout': {message: 'Signed out'},
@@ -167,7 +166,7 @@ test('logout clears saved session token', async () => {
 });
 
 
-test('activation shows spinner before server response and success with expiry', async () => {
+test('web License check shows spinner and expiry without enrolling an IPA device', async () => {
   const h = harness();
   await h.app.handlers.submit({
     target: form({email:'admin@example.com', password:'private-password'}),
@@ -176,7 +175,7 @@ test('activation shows spinner before server response and success with expiry', 
   await h.app.handlers.click({
     target: {closest: () => ({dataset:{action:'tab',tab:'activate'}})}
   });
-  const fields = form({key:'duyle-ABCDEF123456-lotsOfRandomLicenseCharacters',label:'Safari'},'activate');
+  const fields = form({key:'duyle-ABCDEF123456-lotsOfRandomLicenseCharacters'},'activate');
   const submit = h.app.handlers.submit({target:fields,preventDefault(){}});
   assert.equal(fields.button.disabled,true);
   assert.equal(fields.button.classList.contains('is-loading'),true);
@@ -184,7 +183,13 @@ test('activation shows spinner before server response and success with expiry', 
   await submit;
   assert.equal(fields.button.classList.contains('is-loading'),false);
   assert.equal(fields.button.disabled,false);
-  assert.ok(h.app.innerHTML.includes('Kích hoạt thành công'));
+  assert.ok(h.app.innerHTML.includes('License còn hiệu lực'));
   assert.ok(h.app.innerHTML.includes('Hết hạn:'));
-  assert.ok(h.requests.some(r=>r.relative==='/keys/activate'));
+  const checks = h.requests.filter(r=>r.relative==='/keys/check');
+  assert.equal(checks.length,1);
+  assert.equal(checks[0].init.method,'POST');
+  assert.ok(!checks[0].init.body.includes('device_id'));
+  assert.ok(!checks[0].init.body.includes('Safari'));
+  assert.equal(h.requests.some(r=>r.relative==='/keys/activate'),false);
+  assert.equal(h.saved.has('keyhub_device_id_v1'),false);
 });
