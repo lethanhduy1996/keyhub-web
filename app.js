@@ -2,9 +2,8 @@
 (() => {
   const app = document.getElementById('app');
   const toastEl = document.getElementById('toast');
-  const KEYS = { url: 'keyhub_api_url_v1', device: 'keyhub_device_id_v1', refresh: 'keyhub_remember_refresh_v1' };
+  const KEYS = { url: 'keyhub_api_url_v1', refresh: 'keyhub_remember_refresh_v1' };
   let apiUrl = localStorage.getItem(KEYS.url) || '';
-  let deviceId = localStorage.getItem(KEYS.device) || '';
   // Access tokens and passwords stay in memory. Only an opt-in refresh token
   // is persisted so a returning user can restore a session.
   let access = null, refresh = localStorage.getItem(KEYS.refresh) || null;
@@ -15,10 +14,6 @@
   let deviceEvents = [], showDeviceHistory = false, editingDeviceId = '';
   let activationResult = null;
   let busy = false, messageTimeout;
-  if (!deviceId) {
-    deviceId = globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : 'browser-' + Array.from(globalThis.crypto.getRandomValues(new Uint8Array(20)), b => b.toString(16).padStart(2,'0')).join('');
-    localStorage.setItem(KEYS.device, deviceId);
-  }
   const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = ts => ts ? new Date(ts * 1000).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
   function persistSession() {
@@ -122,7 +117,7 @@
     return `<div class="stats"><div class="stat"><span>License tải về</span><strong>${licenses.length}</strong></div><div class="stat"><span>Đang hoạt động</span><strong>${active}</strong></div><div class="stat"><span>Sắp hết hạn (7 ngày)</span><strong>${expiring}</strong></div><div class="stat"><span>API Key của tôi</span><strong>${apiKeys.length}</strong></div></div>`;
   }
   function homePanel() {
-    return `${stats()}<section class="panel"><h2>Thao tác nhanh</h2><p class="muted">Tạo và quản lý License ngay trên điện thoại.</p><div class="actions">${btn('Danh sách License','nav-keys')}${btn('Quản lý API Key','nav-api')}${me.is_admin?btn('Cấp License mới','nav-issue','') : btn('Kích hoạt License','nav-activate','')}</div></section><section class="panel"><h2>Trạng thái máy chủ</h2><p class="muted">${esc(apiUrl)}</p><div class="actions">${btn('Kiểm tra kết nối','ping')}</div></section><div class="notice">Dữ liệu lấy trực tiếp từ Key Server. Telegram Bot KeyHub đã được tích hợp riêng. Hiện chưa có sao lưu tự động hoặc thanh toán.</div>`;
+    return `${stats()}<section class="panel"><h2>Thao tác nhanh</h2><p class="muted">Tạo và quản lý License ngay trên điện thoại.</p><div class="actions">${btn('Danh sách License','nav-keys')}${btn('Quản lý API Key','nav-api')}${me.is_admin?btn('Cấp License mới','nav-issue','') : btn('Kiểm tra License','nav-activate','')}</div></section><section class="panel"><h2>Trạng thái máy chủ</h2><p class="muted">${esc(apiUrl)}</p><div class="actions">${btn('Kiểm tra kết nối','ping')}</div></section><div class="notice">Dữ liệu lấy trực tiếp từ Key Server. Telegram Bot KeyHub đã được tích hợp riêng. Hiện chưa có sao lưu tự động hoặc thanh toán.</div>`;
   }
   function keyRecord(item) {
     const attrs=`data-id="${esc(item.id)}"`;
@@ -144,7 +139,7 @@
       : '<div class="empty">Không tìm thấy License phù hợp với bộ lọc.</div>';
   }
   function licensesPanel() {
-    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kích hoạt','nav-activate','')}${btn('Tải lại','refresh','alt')}</div><div class="license-filters"><label class="field">Tìm License<input data-filter="license-query" type="search" autocomplete="off" value="${esc(licenseQuery)}" placeholder="Mã, email hoặc ghi chú…"></label><label class="field">Trạng thái<select data-filter="license-status"><option value="all" ${licenseStatus==='all'?'selected':''}>Tất cả</option><option value="active" ${licenseStatus==='active'?'selected':''}>Còn hiệu lực</option><option value="inactive" ${licenseStatus==='inactive'?'selected':''}>Hết hạn / đã thu hồi</option></select></label></div><div class="result-count" id="license-count"></div><div id="license-results">${licenseCards()}</div>${me.is_admin?'<div class="actions">'+btn('Xóa tất cả Key hết hạn / đã thu hồi','delete-inactive-licenses','danger')+'</div><p class="hint">Chỉ xóa License đã hết hạn hoặc bị thu hồi. Xóa vĩnh viễn cả thiết bị và lịch sử liên quan; không thể hoàn tác. Tối đa 500 License/lần.</p>':''}</section>`;
+    return `<section class="panel"><h2>License</h2><div class="actions">${me.is_admin?btn('Cấp License','nav-issue',''):btn('Kiểm tra Key','nav-activate','')}${btn('Tải lại','refresh','alt')}</div><div class="license-filters"><label class="field">Tìm License<input data-filter="license-query" type="search" autocomplete="off" value="${esc(licenseQuery)}" placeholder="Mã, email hoặc ghi chú…"></label><label class="field">Trạng thái<select data-filter="license-status"><option value="all" ${licenseStatus==='all'?'selected':''}>Tất cả</option><option value="active" ${licenseStatus==='active'?'selected':''}>Còn hiệu lực</option><option value="inactive" ${licenseStatus==='inactive'?'selected':''}>Hết hạn / đã thu hồi</option></select></label></div><div class="result-count" id="license-count"></div><div id="license-results">${licenseCards()}</div>${me.is_admin?'<div class="actions">'+btn('Xóa tất cả Key hết hạn / đã thu hồi','delete-inactive-licenses','danger')+'</div><p class="hint">Chỉ xóa License đã hết hạn hoặc bị thu hồi. Xóa vĩnh viễn cả thiết bị và lịch sử liên quan; không thể hoàn tác. Tối đa 500 License/lần.</p>':''}</section>`;
   }
   function updateLicenseFilters() {
     const box = document.getElementById('license-results');
@@ -157,7 +152,7 @@
     return `<section class="panel"><h2>Cấp License mới</h2><p class="muted">Chỉ admin được tạo. Email nhận Key phải có tài khoản trước.</p><form data-form="issue"><div class="field"><label>Email người nhận</label><input name="owner_email" type="email" required placeholder="khachhang@example.com"></div><div class="two-col" style="margin-top:12px"><div><label>Thời hạn (ngày)</label><input name="expires_days" type="number" min="1" max="3650" value="30" required></div><div><label>Số thiết bị</label><input name="device_limit" type="number" min="1" max="10" value="1" required></div></div><div class="field" style="margin-top:12px"><label>Ghi chú</label><input name="note" maxlength="200" placeholder="Gói 30 ngày"></div><div class="actions"><button class="btn" type="submit">Tạo Key</button>${btn('Trở lại danh sách','nav-keys')}</div></form></section>`;
   }
   function activatePanel() {
-    return `<section class="panel"><h2>Kích hoạt License</h2><p class="muted">Dùng mã License được cấp cho email đang đăng nhập.</p><form data-form="activate"><div class="field"><label>Nhập mã License</label><input name="key" required minlength="30" autocomplete="off" placeholder="duyle-..."></div><div class="field"><label>Tên thiết bị</label><input name="label" maxlength="80" value="Safari trên iPhone"></div><div class="actions"><button class="btn" type="submit">Kích hoạt</button>${btn('Trở lại danh sách','nav-keys')}</div></form><p class="hint">Lưu ý: Mã thiết bị của bản web chỉ là ID do trình duyệt tạo ra, không phải bằng chứng nhận dạng thiết bị đáng tin cậy.</p></section>`;
+    return `<section class="panel"><h2>Kiểm tra License</h2><p class="muted">Kiểm tra hạn dùng trên website, không kích hoạt hay chiếm suất thiết bị của IPA.</p><form data-form="activate"><div class="field"><label>Nhập mã License</label><input name="key" required minlength="30" autocomplete="off" placeholder="duyle-..."></div><div class="actions"><button class="btn" type="submit">Kiểm tra Key</button>${btn('Trở lại danh sách','nav-keys')}</div></form><p class="hint">Để sử dụng trong IPA, nhập Key vào màn hình kích hoạt bên trong ứng dụng. Nếu trước đây bạn đã kích hoạt bằng Safari, hãy vào Danh sách License → Thiết bị → gỡ mục Safari cũ để trả lại suất thiết bị.</p></section>`;
   }
   function devicesPanel() {
     const descriptions = {activated:'Đã kích hoạt',renamed:'Đã đổi tên',removed:'Đã gỡ thiết bị'};
@@ -192,9 +187,9 @@
     else if(tab==='activate') content=activatePanel();
     else if(tab==='devices') content=devicesPanel();
     else content=homePanel();
-    const title={home:'Tổng quan',keys:'Danh sách License',api:'Quản lý API Key',account:'Tài khoản',issue:'Cấp License',activate:'Kích hoạt License',devices:'Thiết bị'}[tab]||'Tổng quan';
+    const title={home:'Tổng quan',keys:'Danh sách License',api:'Quản lý API Key',account:'Tài khoản',issue:'Cấp License',activate:'Kiểm tra License',devices:'Thiết bị'}[tab]||'Tổng quan';
     const activationBanner = tab === 'keys' && activationResult ?
-      `<section class="panel activation-result" role="status" aria-live="polite"><strong>✓ Kích hoạt thành công</strong><p>License: ${esc(activationResult.prefix)}…</p><p><strong>Hết hạn: ${fmt(activationResult.expires_at)} (giờ trên thiết bị)</strong></p><div class="actions">${btn('Đóng thông báo','dismiss-activation','alt')}</div></section>` : '';
+      `<section class="panel activation-result" role="status" aria-live="polite"><strong>✓ License còn hiệu lực</strong><p>License: ${esc(activationResult.prefix)}…</p><p><strong>Hết hạn: ${fmt(activationResult.expires_at)} (giờ trên thiết bị)</strong></p><p class="hint">Website chỉ kiểm tra hạn dùng, không chiếm suất thiết bị IPA.</p><div class="actions">${btn('Đóng thông báo','dismiss-activation','alt')}</div></section>` : '';
     app.innerHTML=header(title)+`<main class="content">${secretPanel()}${activationBanner}${content}</main>`+menu();
     if (tab === 'keys') updateLicenseFilters();
   }
@@ -217,10 +212,12 @@
     if(form.dataset.form==='register') {await request('/auth/register','POST',{email:values.email,password:values.password});tab='signin';render();notify('Đăng ký thành công. Hãy đăng nhập.');return;}
     if(form.dataset.form==='issue') {const x=await request('/keys','POST',{owner_email:values.owner_email,expires_days:Number(values.expires_days),device_limit:Number(values.device_limit),note:values.note});revealed={type:'license',value:x.secret};await loadData();tab='keys';render();notify('Đã cấp License. Lưu mã ngay.');return;}
     if(form.dataset.form==='activate') {
-      const activated = await request('/keys/activate','POST',
-        {key:values.key.trim(),device_id:deviceId,label:values.label});
-      activationResult = {prefix: activated.prefix, expires_at: activated.expires_at};
-      await loadData();tab='keys';render();notify('Đã kích hoạt License.');return;
+      const key = values.key.trim();
+      const checked = await request('/keys/check','POST',{key});
+      if (!checked.valid) throw Error('License không hợp lệ, hết hạn hoặc không thuộc tài khoản.');
+      const prefix = key.split('-')[1] || 'License';
+      activationResult = {prefix, expires_at: checked.expires_at};
+      await loadData();tab='keys';render();notify('Key hợp lệ. Không chiếm suất thiết bị IPA.');return;
     }
     if(form.dataset.form==='rename-device') {
       const label=String(values.label||'').trim();
@@ -248,7 +245,7 @@
         submit.disabled=false;
         if (isActivation) {
           submit.classList.remove('is-loading');
-          submit.textContent='Kích hoạt';
+          submit.textContent='Kiểm tra Key';
           e.target.removeAttribute('aria-busy');
         }
       }
